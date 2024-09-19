@@ -9,7 +9,6 @@ use pulldown_cmark::{html, Options, Parser};
 // 引入异步文件对话框库。
 use rfd::AsyncFileDialog;
 // 引入标准库中的集合和路径处理。
-use epub::doc::EpubDoc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -50,41 +49,6 @@ impl Epub {
             manifest: HashMap::new(),
         }
     }
-    // fn from_epub_doc<R: Read + Seek>(
-    //     doc: &mut EpubDoc<R>,
-    // ) -> Result<Self, Box<dyn std::error::Error>> {
-    //     let mut epub = Epub::new();
-
-    //     // 解析元数据
-    //     epub.metadata.title = doc
-    //         .mdata("title")
-    //         .unwrap_or_else(|| String::from("Unknown Title"));
-    //     epub.metadata.author = doc
-    //         .mdata("creator")
-    //         .unwrap_or_else(|| String::from("Unknown Author"));
-    //     epub.metadata.language = doc.mdata("language").unwrap_or_else(|| String::from("en"));
-
-    //     // 解析 spine 和 manifest
-    //     for i in 0..doc.spine.len() {
-    //         let (_, href, id) = doc
-    //             .get_resource(&doc.spine[i])
-    //             .ok_or("Failed to get resource")?;
-    //         let content = doc.get_resource_str(&doc.spine[i]).unwrap_or_default();
-    //         let media_type = doc.get_resource_mime(&doc.spine[i]).unwrap_or_default();
-
-    //         epub.spine.push(id.clone());
-    //         epub.manifest.insert(
-    //             id.clone(),
-    //             EpubItem {
-    //                 id,
-    //                 href,
-    //                 media_type,
-    //                 content,
-    //             },
-    //         );
-    //     }
-    //     Ok(epub)
-    // }
 }
 
 // 编辑器模式枚举，用于切换富文本和 Markdown 编辑。
@@ -162,20 +126,7 @@ impl Application for EpubEditor {
                             let path = handle.path().to_owned();
 
                             // 这里应该实现实际的 EPUB 解析逻辑
-                            println!("[INFO] 解析 EPUB，路径：{:?}", path);
-                            let mut doc = EpubDoc::new(path).map_err(|e| e.to_string())?;
-
-                            // Collect spine items into a vector
-                            let spine_items: Vec<String> = doc.spine.clone();
-
-                            for item in spine_items.iter() {
-                                // Convert Option to Result
-                                let content = doc.get_resource_str(item).ok_or_else(|| {
-                                    String::from("Failed to get resource content")
-                                })?;
-
-                                println!("Content of {:?}: {:?}", item, content);
-                            }
+                            println!("[INFO] 解析 EPUB");
                             Ok(Epub::new()) // 暂时返回一个空的 Epub 结构
                         } else {
                             Err("No file selected".to_string())
@@ -348,8 +299,3 @@ impl EpubEditor {
         self.markdown_preview = html_output;
     }
 }
-// fn parse_epub(path: PathBuf) -> Result<Epub, String> {
-//     let mut doc = EpubDoc::new(path).map_err(|e| format!("Failed to open EPUB: {}", e))?;
-
-//     Epub::from_epub_doc(&mut doc).map_err(|e| format!("Failed to parse EPUB: {}", e))
-// }
