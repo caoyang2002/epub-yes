@@ -1,25 +1,25 @@
-// 引入 iced 库中的各种组件和功能。
+`ui.rs`
+```rust
+use epub::doc::EpubDoc;
 use iced::{
     executor, theme,
     widget::{button, checkbox, column, row, scrollable, text, text_input, Container},
     Application, Command, Element, Length, Settings, Theme,
 };
-// 引入 Markdown 解析库。
 use pulldown_cmark::{html, Options, Parser};
-// 引入异步文件对话框库。
 use rfd::AsyncFileDialog;
-// 引入标准库中的集合和路径处理。
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use zip::result::ZipError;
 
-// EPUB 数据结构定义。
+// EPUB 数据结构 (保持不变)
 #[derive(Debug, Clone)]
 struct Epub {
     metadata: EpubMetadata,
     spine: Vec<String>,
     manifest: HashMap<String, EpubItem>,
 }
-// EPUB 元数据结构定义。
+
 #[derive(Debug, Clone)]
 struct EpubMetadata {
     title: String,
@@ -27,7 +27,6 @@ struct EpubMetadata {
     language: String,
 }
 
-// EPUB 项目项结构定义。
 #[derive(Debug, Clone)]
 struct EpubItem {
     id: String,
@@ -36,29 +35,51 @@ struct EpubItem {
     content: String,
 }
 
-// Epub 结构的实现，提供一个新方法来创建新的 EPUB 实例。
 impl Epub {
-    fn new() -> Self {
-        Self {
-            metadata: EpubMetadata {
-                title: String::new(),
-                author: String::new(),
-                language: String::new(),
-            },
-            spine: Vec::new(),
-            manifest: HashMap::new(),
+    fn from_epub_doc<R: std::io::Read + std::io::Seek>(
+        doc: &mut EpubDoc<R>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut epub = Epub::new();
+
+        // Parse metadata
+        epub.metadata.title = doc
+            .mdata("title")
+            .unwrap_or_else(|| String::from("Unknown Title"));
+        epub.metadata.author = doc
+            .mdata("creator")
+            .unwrap_or_else(|| String::from("Unknown Author"));
+        epub.metadata.language = doc.mdata("language").unwrap_or_else(|| String::from("en"));
+
+        // Parse spine and manifest
+        for i in 0..doc.spine.len() {
+            let (href, id) = doc
+                .get_resource(&doc.spine[i])
+                .ok_or("Failed to get resource")?;
+            let (content, _) = doc.get_resource_str(&doc.spine[i]).unwrap_or_default();
+            let media_type = doc.get_resource_mime(&doc.spine[i]).unwrap_or_default();
+
+            epub.spine.push(id.clone());
+            epub.manifest.insert(
+                id.clone(),
+                EpubItem {
+                    id,
+                    href: String::from_utf8(href).unwrap_or_default(),
+                    media_type,
+                    content,
+                },
+            );
         }
+
+        Ok(epub)
     }
 }
 
-// 编辑器模式枚举，用于切换富文本和 Markdown 编辑。
 #[derive(Debug, Clone)]
 enum EditorMode {
     RichText,
     Markdown,
 }
 
-// EPUB 编辑器应用程序的状态结构定义。
 pub struct EpubEditor {
     epub: Epub,
     current_item_id: Option<String>,
@@ -67,7 +88,6 @@ pub struct EpubEditor {
     markdown_preview: String,
 }
 
-// EpubEditor 结构的实现，提供更新 Markdown 预览的方法。
 #[derive(Debug, Clone)]
 pub enum Message {
     OpenEpub,
@@ -80,7 +100,6 @@ pub enum Message {
     UpdateMarkdownPreview,
 }
 
-// 元数据字段枚举，用于更新 EPUB 元数据。
 #[derive(Debug, Clone)]
 pub enum MetadataField {
     Title,
@@ -88,7 +107,6 @@ pub enum MetadataField {
     Language,
 }
 
-// 为 EpubEditor 结构体实现 iced 的 Application trait。
 impl Application for EpubEditor {
     type Message = Message;
     type Theme = Theme;
@@ -123,9 +141,9 @@ impl Application for EpubEditor {
                             .await
                         {
                             let path = handle.path().to_owned();
-
-                            // 这里应该实现实际的 EPUB 解析逻辑
-                            Ok(Epub::new()) // 暂时返回一个空的 Epub 结构
+                            println!("[INFO] {:?}", path);
+                            //  EPUB 解析逻辑
+                            parse_epub(path)
                         } else {
                             Err("No file selected".to_string())
                         }
@@ -143,6 +161,7 @@ impl Application for EpubEditor {
                                 self.edit_content = item.content.clone();
                             }
                         }
+                        self.update_markdown_preview();
                     }
                     Err(e) => {
                         println!("Error loading EPUB: {}", e);
@@ -254,7 +273,7 @@ impl Application for EpubEditor {
         let editor_toggle = checkbox(
             "Use Markdown Editor",
             matches!(self.editor_mode, EditorMode::Markdown),
-            |_| Message::ToggleEditorMode,
+            |_| Message::ToggleEditorMode, // Remove the boolean parameter
         );
 
         let content = column![
@@ -266,7 +285,13 @@ impl Application for EpubEditor {
                 scrollable(column![text("File Structure:"), file_list])
                     .width(Length::FillPortion(1))
                     .height(Length::Fill),
-                column![text("Content Editor:"), editor].width(Length::FillPortion(3)),
+                column![
+                    text("Content Editor:"),
+                    editor,
+                    scrollable(text(&self.markdown_preview).size(14))
+                        .height(Length::FillPortion(1))
+                ]
+                .width(Length::FillPortion(3)),
             ]
             .spacing(20)
             .height(Length::Fill),
@@ -286,7 +311,6 @@ impl Application for EpubEditor {
     }
 }
 
-// EpubEditor 结构的实现，提供更新 Markdown 预览的方法。
 impl EpubEditor {
     fn update_markdown_preview(&mut self) {
         let mut options = Options::empty();
@@ -297,3 +321,17 @@ impl EpubEditor {
         self.markdown_preview = html_output;
     }
 }
+
+fn parse_epub(path: PathBuf) -> Result<Epub, String> {
+    let mut doc = EpubDoc::new(path).map_err(|e| format!("Failed to open EPUB: {}", e))?;
+
+    Epub::from_epub_doc(&mut doc).map_err(|e| format!("Failed to parse EPUB: {}", e))
+}
+```
+
+
+
+第一版可以正确显示的
+
+```rust
+```

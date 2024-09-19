@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-epub = "1.2"
-iced = { version = "0.9", features = ["tokio", "async-std"] }
-rfd = "0.11"
+iced = { version = "0.10", features = ["tokio", "async-std"] }
+rfd = "0.12"
 tokio = { version = "1.0", features = ["full"] }
+iced_aw = "0.10"
+pulldown-cmark = "0.9"
+epub = "2.0"
+zip = "0.6"
